@@ -2,6 +2,23 @@ import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, Link, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from './supabaseClient';
 
+async function syncShipmentWithCourier(shipment) {
+  const { data, error } = await supabase.functions.invoke('sync-shipment', {
+    body: {
+      shipmentId: shipment.id,
+      awb: shipment.awb_number,
+      courierCode: shipment.courier_code || 'STCOURIER',
+    },
+  });
+
+  if (error) {
+    console.error('Edge function error:', error.message);
+    return { success: false, error: error.message };
+  }
+
+  return data;
+}
+
 const STATUS_STEPS = [
   'Order Packed',
   'Picked up by ST Courier',
@@ -155,6 +172,8 @@ function DashboardPage() {
   const [vendor, setVendor] = useState(null);
   const [shipments, setShipments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [submittingShipment, setSubmittingShipment] = useState(false);
+  const [syncingId, setSyncingId] = useState(null);
   const [setupBrand, setSetupBrand] = useState('');
   const [setupPhone, setSetupPhone] = useState('');
   const [form, setForm] = useState({
@@ -197,13 +216,17 @@ function DashboardPage() {
     setVendor(vData || null);
 
     if (vData) {
-      const { data: sData } = await supabase
-        .from('shipments')
-        .select('*')
-        .eq('vendor_id', vData.id)
-        .order('created_at', { ascending: false });
-      setShipments(sData || []);
+      await fetchShipmentsForVendor(vData.id);
     }
+  }
+
+  async function fetchShipmentsForVendor(vendorId) {
+    const { data: sData } = await supabase
+      .from('shipments')
+      .select('*')
+      .eq('vendor_id', vendorId)
+      .order('created_at', { ascending: false });
+    setShipments(sData || []);
   }
 
   async function createMissingVendorProfile(e) {
@@ -262,7 +285,9 @@ function DashboardPage() {
 
   async function handleAddShipment(e) {
     e.preventDefault();
-    if (!vendor) return;
+    if (!vendor || submittingShipment) return;
+    setSubmittingShipment(true);
+
     const initialCheckpoint = [
       {
         status: form.status,
@@ -271,6 +296,9 @@ function DashboardPage() {
       },
     ];
 
+    const courierName = form.courier_name.trim() || 'ST Courier';
+    const courierCode = courierName.toUpperCase().includes('ST') ? 'STCOURIER' : 'STCOURIER';
+
     const { data, error } = await supabase
       .from('shipments')
       .insert({
@@ -278,7 +306,8 @@ function DashboardPage() {
         customer_name: form.customer_name.trim(),
         customer_phone: form.customer_phone.trim(),
         order_id: form.order_id.trim(),
-        courier_name: form.courier_name.trim() || 'ST Courier',
+        courier_name: courierName,
+        courier_code: courierCode,
         awb_number: form.awb_number.trim().toUpperCase(),
         status: form.status,
         eta_text: form.eta_text.trim(),
@@ -288,11 +317,15 @@ function DashboardPage() {
       .single();
 
     if (error) {
+      setSubmittingShipment(false);
       alert(error.message);
       return;
     }
 
-    setShipments((prev) => [data, ...prev]);
+    // Auto-sync live tracking right after inserting the shipment
+    await syncShipmentWithCourier(data);
+    await fetchShipmentsForVendor(vendor.id);
+
     setForm({
       customer_name: '',
       customer_phone: '',
@@ -302,6 +335,22 @@ function DashboardPage() {
       status: 'Picked up by ST Courier',
       eta_text: 'Arriving in 2–3 days',
     });
+    setSubmittingShipment(false);
+  }
+
+  async function handleManualSync(shipment) {
+    if (!vendor) return;
+    setSyncingId(shipment.id);
+    try {
+      const res = await syncShipmentWithCourier(shipment);
+      if (res?.success) {
+        await fetchShipmentsForVendor(vendor.id);
+      } else {
+        alert(res?.error || 'Could not fetch live courier updates yet.');
+      }
+    } finally {
+      setSyncingId(null);
+    }
   }
 
   async function handleStatusChange(shipment, nextStatus) {
@@ -430,8 +479,12 @@ function DashboardPage() {
           required
           style={{ padding: 10, borderRadius: 8, border: '1px solid #d1d5db' }}
         />
-        <button type="submit" style={{ padding: 10, borderRadius: 8, border: 'none', background: vendor.primary_color || '#7C2D12', color: '#fff', fontWeight: 600, cursor: 'pointer' }}>
-          + Add Shipment
+        <button
+          type="submit"
+          disabled={submittingShipment}
+          style={{ padding: 10, borderRadius: 8, border: 'none', background: vendor.primary_color || '#7C2D12', color: '#fff', fontWeight: 600, cursor: 'pointer' }}
+        >
+          {submittingShipment ? 'Adding & Syncing...' : '+ Add Shipment'}
         </button>
       </form>
 
@@ -457,6 +510,7 @@ function DashboardPage() {
                 s.awb_number,
                 fullTrackUrl
               );
+              const isSyncing = syncingId === s.id;
 
               return (
                 <tr key={s.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
@@ -466,6 +520,11 @@ function DashboardPage() {
                   </td>
                   <td style={{ padding: 10 }}>
                     {s.courier_name} · <code>{s.awb_number}</code>
+                    {s.last_synced_at && (
+                      <div style={{ fontSize: 11, color: '#6b7280' }}>
+                        Synced: {new Date(s.last_synced_at).toLocaleTimeString('en-IN')}
+                      </div>
+                    )}
                   </td>
                   <td style={{ padding: 10 }}>
                     <select
@@ -473,12 +532,23 @@ function DashboardPage() {
                       onChange={(e) => handleStatusChange(s, e.target.value)}
                       style={{ padding: 6, borderRadius: 6, border: '1px solid #d1d5db' }}
                     >
+                      {!STATUS_STEPS.includes(s.status) && (
+                        <option value={s.status}>{s.status}</option>
+                      )}
                       {STATUS_STEPS.map((st) => (
                         <option key={st} value={st}>{st}</option>
                       ))}
                     </select>
                   </td>
-                  <td style={{ padding: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <td style={{ padding: 10, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      disabled={isSyncing}
+                      onClick={() => handleManualSync(s)}
+                      style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db', background: '#f9fafb', color: '#111827', fontSize: 13, cursor: 'pointer' }}
+                    >
+                      {isSyncing ? 'Syncing...' : 'Sync Live'}
+                    </button>
                     <Link to={trackPath} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db', textDecoration: 'none', color: '#111827', fontSize: 13 }}>
                       Track Page
                     </Link>
