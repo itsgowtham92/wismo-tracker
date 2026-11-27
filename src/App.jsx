@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, Link, useNavigate, useParams } from 'react-router-dom';
+import { QRCodeSVG } from 'qrcode.react';
 import { supabase } from './supabaseClient';
 
 const POPULAR_COURIERS = [
@@ -106,6 +107,23 @@ const OTHER_COURIERS = [
 const ALL_COURIERS = [...POPULAR_COURIERS, ...OTHER_COURIERS];
 
 const SYNC_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
+const SYNC_FEE_RUPEES = 5; // ₹5 per live courier sync
+
+const OWNER_UPI_ID = import.meta.env.VITE_OWNER_UPI_ID || 'yourname@okaxis';
+const OWNER_PAYEE_NAME = import.meta.env.VITE_OWNER_PAYEE_NAME || 'WISMO Credits';
+const ADMIN_EMAIL = (import.meta.env.VITE_ADMIN_EMAIL || '').trim().toLowerCase();
+
+function buildUpiUri(amount, note) {
+  const cleanAmt = Math.max(1, Number(amount) || 299);
+  const params = new URLSearchParams({
+    pa: OWNER_UPI_ID,
+    pn: OWNER_PAYEE_NAME,
+    am: cleanAmt.toFixed(2),
+    cu: 'INR',
+    tn: note || 'WISMO Credit Recharge',
+  });
+  return `upi://pay?${params.toString()}`;
+}
 
 async function syncShipmentWithCourier(shipment) {
   const { data, error } = await supabase.functions.invoke('sync-shipment', {
@@ -194,6 +212,7 @@ function AuthPage() {
             slug: cleanSlug,
             primary_color: '#7C2D12',
             whatsapp_support: whatsappSupport.trim(),
+            credit_balance: 0,
           });
           if (vendorError) throw vendorError;
           navigate('/dashboard');
@@ -307,6 +326,17 @@ function DashboardPage() {
     promo_text: '',
   });
 
+  // Recharge & UPI QR Modal states
+  const [showRechargeModal, setShowRechargeModal] = useState(false);
+  const [rechargeAmount, setRechargeAmount] = useState(500);
+  const [utrReference, setUtrReference] = useState('');
+  const [submittingRecharge, setSubmittingRecharge] = useState(false);
+  const [rechargeNotice, setRechargeNotice] = useState('');
+
+  // Admin Top-Up Approval states
+  const [pendingRequests, setPendingRequests] = useState([]);
+  const [processingReqId, setProcessingReqId] = useState(null);
+
   const [form, setForm] = useState(() => ({
     customer_name: '',
     customer_phone: '',
@@ -318,6 +348,8 @@ function DashboardPage() {
   }));
   const navigate = useNavigate();
 
+  const isAdmin = Boolean(ADMIN_EMAIL && session?.user?.email?.toLowerCase() === ADMIN_EMAIL);
+
   useEffect(() => {
     let active = true;
     async function init() {
@@ -328,7 +360,7 @@ function DashboardPage() {
         return;
       }
       setSession(data.session);
-      await loadVendorAndShipments(data.session.user.id);
+      await loadVendorAndShipments(data.session.user.id, data.session.user.email);
       if (active) setLoading(false);
     }
     init();
@@ -337,7 +369,19 @@ function DashboardPage() {
     };
   }, [navigate]);
 
-  async function loadVendorAndShipments(userId) {
+  async function loadPendingRequests() {
+    const { data, error } = await supabase
+      .from('credit_requests')
+      .select('id, vendor_id, amount, utr_reference, status, created_at, vendors(brand_name, slug, credit_balance)')
+      .eq('status', 'PENDING')
+      .order('created_at', { ascending: false });
+
+    if (!error) {
+      setPendingRequests(data || []);
+    }
+  }
+
+  async function loadVendorAndShipments(userId, userEmail) {
     const { data: vData } = await supabase
       .from('vendors')
       .select('*')
@@ -354,6 +398,10 @@ function DashboardPage() {
       });
       await fetchShipmentsForVendor(vData.id);
     }
+
+    if (ADMIN_EMAIL && userEmail?.toLowerCase() === ADMIN_EMAIL) {
+      await loadPendingRequests();
+    }
   }
 
   async function fetchShipmentsForVendor(vendorId) {
@@ -363,6 +411,49 @@ function DashboardPage() {
       .eq('vendor_id', vendorId)
       .order('created_at', { ascending: false });
     setShipments(sData || []);
+  }
+
+  async function refreshVendorBalance(vendorId) {
+    const { data } = await supabase
+      .from('vendors')
+      .select('*')
+      .eq('id', vendorId)
+      .maybeSingle();
+    if (data) setVendor(data);
+  }
+
+  async function handleApproveRequest(reqId) {
+    setProcessingReqId(reqId);
+    try {
+      const { error } = await supabase.rpc('approve_credit_request', { p_request_id: reqId });
+      if (error) {
+        alert(error.message);
+        return;
+      }
+      await Promise.all([
+        loadPendingRequests(),
+        vendor ? refreshVendorBalance(vendor.id) : Promise.resolve(),
+      ]);
+    } finally {
+      setProcessingReqId(null);
+    }
+  }
+
+  async function handleRejectRequest(reqId) {
+    setProcessingReqId(reqId);
+    try {
+      const { error } = await supabase
+        .from('credit_requests')
+        .update({ status: 'REJECTED' })
+        .eq('id', reqId);
+      if (error) {
+        alert(error.message);
+        return;
+      }
+      await loadPendingRequests();
+    } finally {
+      setProcessingReqId(null);
+    }
   }
 
   async function createMissingVendorProfile(e) {
@@ -377,6 +468,7 @@ function DashboardPage() {
         slug: cleanSlug,
         primary_color: '#7C2D12',
         whatsapp_support: setupPhone.trim(),
+        credit_balance: 0,
       })
       .select()
       .single();
@@ -448,9 +540,62 @@ function DashboardPage() {
     setVendor(updatedVendor);
   }
 
+  async function handleRechargeSubmit(e) {
+    e.preventDefault();
+    if (!vendor || submittingRecharge) return;
+    const amt = Number(rechargeAmount);
+    if (!amt || amt < 5) {
+      alert('Please enter an amount of at least ₹5.');
+      return;
+    }
+
+    setSubmittingRecharge(true);
+    setRechargeNotice('');
+    try {
+      const { error } = await supabase.from('credit_requests').insert({
+        vendor_id: vendor.id,
+        amount: amt,
+        utr_reference: utrReference.trim() || null,
+        status: 'PENDING',
+      });
+
+      if (error) {
+        alert(error.message);
+        return;
+      }
+
+      setUtrReference('');
+      setRechargeNotice(
+        `Recharge request for ₹${amt} submitted. Credits will appear once payment is verified.`
+      );
+      if (isAdmin) {
+        await loadPendingRequests();
+      }
+    } finally {
+      setSubmittingRecharge(false);
+    }
+  }
+
+  async function handleCopyUpiId() {
+    try {
+      await navigator.clipboard.writeText(OWNER_UPI_ID);
+      alert(`Copied UPI ID: ${OWNER_UPI_ID}`);
+    } catch {
+      alert(`UPI ID: ${OWNER_UPI_ID}`);
+    }
+  }
+
   async function handleAddShipment(e) {
     e.preventDefault();
     if (!vendor || submittingShipment) return;
+
+    const currentBalance = Number(vendor.credit_balance ?? 0);
+    if (currentBalance < SYNC_FEE_RUPEES) {
+      setShowRechargeModal(true);
+      alert(`Insufficient balance (₹${currentBalance}). Recharge at least ₹${SYNC_FEE_RUPEES} via UPI QR to run live courier sync.`);
+      return;
+    }
+
     setSubmittingShipment(true);
 
     const selectedCourier =
@@ -494,7 +639,7 @@ function DashboardPage() {
     }
 
     await syncShipmentWithCourier(data);
-    await fetchShipmentsForVendor(vendor.id);
+    await Promise.all([fetchShipmentsForVendor(vendor.id), refreshVendorBalance(vendor.id)]);
 
     setForm({
       customer_name: '',
@@ -516,6 +661,13 @@ function DashboardPage() {
       return;
     }
 
+    const currentBalance = Number(vendor.credit_balance ?? 0);
+    if (currentBalance < SYNC_FEE_RUPEES) {
+      setShowRechargeModal(true);
+      alert(`Insufficient balance (₹${currentBalance}). Each live sync deducts ₹${SYNC_FEE_RUPEES}. Please recharge via UPI QR.`);
+      return;
+    }
+
     if (shipment.last_synced_at) {
       const elapsed = Date.now() - new Date(shipment.last_synced_at).getTime();
       if (elapsed < SYNC_COOLDOWN_MS) {
@@ -529,7 +681,7 @@ function DashboardPage() {
     try {
       const res = await syncShipmentWithCourier(shipment);
       if (res?.success) {
-        await fetchShipmentsForVendor(vendor.id);
+        await Promise.all([fetchShipmentsForVendor(vendor.id), refreshVendorBalance(vendor.id)]);
       } else {
         alert(res?.error || 'Could not fetch live courier updates yet.');
       }
@@ -614,6 +766,9 @@ function DashboardPage() {
     );
   });
 
+  const balanceNum = Number(vendor.credit_balance ?? 0);
+  const upiUri = buildUpiUri(rechargeAmount, `${vendor.slug} credit top-up`);
+
   return (
     <div style={{ maxWidth: 980, margin: '24px auto', padding: 16, fontFamily: 'sans-serif' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
@@ -623,11 +778,30 @@ function DashboardPage() {
           )}
           <div>
             <h2 style={{ margin: 0 }}>{vendor.brand_name} — Dispatch Portal</h2>
-            <small style={{ color: '#6b7280' }}>Tracking slug: /{vendor.slug}</small>
+            <small style={{ color: '#6b7280' }}>Tracking slug: /{vendor.slug} · ₹{SYNC_FEE_RUPEES}/live sync</small>
           </div>
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => {
+              setRechargeNotice('');
+              setShowRechargeModal((prev) => !prev);
+            }}
+            style={{
+              padding: '8px 12px',
+              borderRadius: 8,
+              border: '1px solid #d1d5db',
+              background: balanceNum < SYNC_FEE_RUPEES ? '#fef2f2' : '#ecfdf5',
+              color: balanceNum < SYNC_FEE_RUPEES ? '#b91c1c' : '#065f46',
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: 700,
+            }}
+          >
+            Balance: ₹{balanceNum.toFixed(0)} · + Recharge
+          </button>
           <button
             type="button"
             onClick={() => setShowSettings((prev) => !prev)}
@@ -644,6 +818,157 @@ function DashboardPage() {
           </button>
         </div>
       </header>
+
+      {/* Admin Top-Up Approval Panel */}
+      {isAdmin && (
+        <div style={{ padding: 16, border: '1px solid #c7d2fe', borderRadius: 12, background: '#eef2ff', marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <strong>Admin Top-Up Approval ({pendingRequests.length} Pending)</strong>
+            <button
+              type="button"
+              onClick={loadPendingRequests}
+              style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #c7d2fe', background: '#fff', cursor: 'pointer', fontSize: 12 }}
+            >
+              Refresh
+            </button>
+          </div>
+
+          {pendingRequests.length === 0 ? (
+            <div style={{ fontSize: 13, color: '#4b5563' }}>No pending UPI recharge requests.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {pendingRequests.map((item) => (
+                <div
+                  key={item.id}
+                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, padding: 10, borderRadius: 8, background: '#fff', border: '1px solid #e5e7eb', fontSize: 13 }}
+                >
+                  <div>
+                    <strong>{item.vendors?.brand_name || item.vendor_id}</strong> (/{item.vendors?.slug}) —{' '}
+                    <strong>₹{Number(item.amount).toFixed(0)}</strong>
+                    <div style={{ fontSize: 11, color: '#6b7280' }}>
+                      UTR: {item.utr_reference || 'Not provided'} · Current Bal: ₹{Number(item.vendors?.credit_balance ?? 0).toFixed(0)}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      type="button"
+                      disabled={processingReqId === item.id}
+                      onClick={() => handleApproveRequest(item.id)}
+                      style={{ padding: '6px 12px', borderRadius: 6, border: 'none', background: '#16a34a', color: '#fff', fontWeight: 600, cursor: 'pointer', fontSize: 12 }}
+                    >
+                      {processingReqId === item.id ? 'Approving...' : 'Approve'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={processingReqId === item.id}
+                      onClick={() => handleRejectRequest(item.id)}
+                      style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db', background: '#fff', color: '#b91c1c', cursor: 'pointer', fontSize: 12 }}
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* UPI QR Recharge Panel */}
+      {showRechargeModal && (
+        <div style={{ padding: 18, border: '1px solid #d1d5db', borderRadius: 12, background: '#f9fafb', marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div>
+              <h3 style={{ margin: 0 }}>Recharge Credits via UPI QR</h3>
+              <small style={{ color: '#6b7280' }}>Each live courier sync deducts ₹{SYNC_FEE_RUPEES} from your credit balance.</small>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowRechargeModal(false)}
+              style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer', fontSize: 12 }}
+            >
+              Close
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            <div style={{ background: '#fff', padding: 12, borderRadius: 10, border: '1px solid #e5e7eb', textAlign: 'center' }}>
+              <QRCodeSVG value={upiUri} size={148} />
+              <div style={{ fontSize: 12, fontWeight: 700, marginTop: 8 }}>Scan & Pay ₹{Number(rechargeAmount || 0)}</div>
+              <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>{OWNER_UPI_ID}</div>
+              <button
+                type="button"
+                onClick={handleCopyUpiId}
+                style={{ marginTop: 6, padding: '4px 8px', borderRadius: 6, border: '1px solid #d1d5db', background: '#f9fafb', cursor: 'pointer', fontSize: 11 }}
+              >
+                Copy UPI ID
+              </button>
+            </div>
+
+            <form onSubmit={handleRechargeSubmit} style={{ flex: 1, minWidth: 240, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {[299, 500, 599, 1199].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setRechargeAmount(preset)}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: 8,
+                      border: '1px solid #d1d5db',
+                      background: Number(rechargeAmount) === preset ? '#111827' : '#fff',
+                      color: Number(rechargeAmount) === preset ? '#fff' : '#111827',
+                      cursor: 'pointer',
+                      fontSize: 13,
+                      fontWeight: 600,
+                    }}
+                  >
+                    ₹{preset}
+                  </button>
+                ))}
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 12, color: '#374151', marginBottom: 4 }}>Amount (₹)</label>
+                <input
+                  type="number"
+                  min={5}
+                  step="1"
+                  value={rechargeAmount}
+                  onChange={(e) => setRechargeAmount(e.target.value)}
+                  required
+                  style={{ width: '100%', padding: 9, borderRadius: 8, border: '1px solid #d1d5db', background: '#fff' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 12, color: '#374151', marginBottom: 4 }}>UPI UTR / Reference # (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g., 633112345678"
+                  value={utrReference}
+                  onChange={(e) => setUtrReference(e.target.value)}
+                  style={{ width: '100%', padding: 9, borderRadius: 8, border: '1px solid #d1d5db', background: '#fff' }}
+                />
+              </div>
+
+              {rechargeNotice && (
+                <div style={{ fontSize: 12, color: '#065f46', background: '#ecfdf5', padding: 8, borderRadius: 8 }}>
+                  {rechargeNotice}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={submittingRecharge}
+                style={{ padding: '10px 14px', borderRadius: 8, border: 'none', background: '#111827', color: '#fff', fontWeight: 600, cursor: 'pointer' }}
+              >
+                {submittingRecharge ? 'Submitting...' : 'I Have Paid — Submit Top-Up Request'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       {showSettings && (
         <form onSubmit={handleSaveSettings} style={{ padding: 16, border: '1px solid #e5e7eb', borderRadius: 12, background: '#f9fafb', marginBottom: 20, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12, alignItems: 'end' }}>
@@ -823,7 +1148,7 @@ function DashboardPage() {
                       type="button"
                       disabled={isSyncing || isDelivered}
                       onClick={() => handleManualSync(s)}
-                      title={isDelivered ? 'Already delivered' : 'Fetch latest courier scan'}
+                      title={isDelivered ? 'Already delivered' : `Sync live (₹${SYNC_FEE_RUPEES})`}
                       style={{
                         padding: '6px 10px',
                         borderRadius: 6,
@@ -834,7 +1159,7 @@ function DashboardPage() {
                         cursor: isDelivered ? 'not-allowed' : 'pointer',
                       }}
                     >
-                      {isSyncing ? 'Syncing...' : isDelivered ? 'Delivered' : 'Sync Live'}
+                      {isSyncing ? 'Syncing...' : isDelivered ? 'Delivered' : `Sync Live (₹${SYNC_FEE_RUPEES})`}
                     </button>
                     <Link to={trackPath} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db', textDecoration: 'none', color: '#111827', fontSize: 13 }}>
                       Track Page
