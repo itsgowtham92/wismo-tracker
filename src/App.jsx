@@ -2,6 +2,111 @@ import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, Link, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from './supabaseClient';
 
+const POPULAR_COURIERS = [
+  { name: 'ST Courier', code: 'STCOURIER' },
+  { name: 'DTDC', code: 'DTDC' },
+  { name: 'Franch Express', code: 'Franch Express' },
+  { name: 'The Professional Couriers', code: 'PROFESSIONAL' },
+  { name: 'Delhivery', code: 'DELHIVERY' },
+  { name: 'Xpressbees', code: 'XPRESSBEES' },
+  { name: 'Blue Dart', code: 'BLUEDART' },
+  { name: 'India Post', code: 'INDIA POST' },
+  { name: 'Speed Post', code: 'Speed Post' },
+  { name: 'Ekart', code: 'EKART' },
+  { name: 'Shadowfax', code: 'SHADOWFAX' },
+  { name: 'Trackon', code: 'TRACKON' },
+  { name: 'Shree Maruti Courier', code: 'SHREE MARUTI COURIER' },
+  { name: 'Shree Tirupati Courier', code: 'SHREE TIRUPATI COURIER' },
+  { name: 'AKR Express', code: 'AKR Express' },
+  { name: 'KPN', code: 'KPN' },
+  { name: 'ABT Parcel Services', code: 'abt parcel services' },
+  { name: 'Valmo', code: 'Valmo' },
+];
+
+const OTHER_COURIERS = [
+  { name: 'ACPL', code: 'Acpl' },
+  { name: 'Air India', code: 'AIRINDIA' },
+  { name: 'Akasa', code: 'AKASA' },
+  { name: 'Alleppey Parcel Service LLP', code: 'ALLEPPEY PARCEL SERVICE LLP' },
+  { name: 'Amazon Tracking Services', code: 'AMAZON TRACKING SERVICES' },
+  { name: 'Aramex', code: 'ARAMEX' },
+  { name: 'ARC Limited', code: 'ARC Limited' },
+  { name: 'Atlantic Courier', code: 'ATLANTIC Courier' },
+  { name: 'Australian Post', code: 'Australian Post' },
+  { name: 'AWCC', code: 'AWCC' },
+  { name: 'BlitzNow', code: 'BLITZNOW' },
+  { name: 'Bombino', code: 'BOMBINO' },
+  { name: 'Bulllettrans', code: 'Bulllettrans' },
+  { name: 'ClickPost', code: 'CLICKPOST' },
+  { name: 'CouriersPlease', code: 'COURIERSPLEASE' },
+  { name: 'CPS Logistics', code: 'cps logistics' },
+  { name: 'Delhivery B2B', code: 'DELHIVERYB2B' },
+  { name: 'DHL', code: 'DHL' },
+  { name: 'Dilliking', code: 'DILLIKING' },
+  { name: 'Dotzot', code: 'DOTZOT' },
+  { name: 'DPD', code: 'DPD' },
+  { name: 'DPD Germany', code: 'DPD Germany' },
+  { name: 'DSK Cargo', code: 'DSK Cargo' },
+  { name: 'Economic Trans Logistics', code: 'Economic Trans Logistics' },
+  { name: 'ECSSPL', code: 'ECSSPL' },
+  { name: 'Elbex Courier Service', code: 'Elbex Courier Service' },
+  { name: 'eShipz', code: 'ESHIPZ' },
+  { name: 'FedEx', code: 'FEDEX' },
+  { name: 'Flight Go Express', code: 'Flight Go Express' },
+  { name: 'Go Swift', code: 'GO SWIFT' },
+  { name: 'Holisol Delivery', code: 'Holisol delivery' },
+  { name: 'HPL Logistics Private Limited', code: 'HPL LOGISTICS PRIVATE LIMITED' },
+  { name: 'India Worldwide Express', code: 'indiaworldwideexpress' },
+  { name: 'IndiGo', code: 'INDIGO' },
+  { name: 'iThink Logistics', code: 'ITHINK LOGISTICS' },
+  { name: 'Kerry Indev', code: 'KERRYINDEV' },
+  { name: 'Linex', code: 'LINEX' },
+  { name: 'M5 Continent Logistics', code: 'M5 CONTINENT LOGISTICS' },
+  { name: 'Madhur Courier', code: 'MADHUR COURIER' },
+  { name: 'Mahanagar Courier', code: 'Mahanagar Courier' },
+  { name: 'Mark Express', code: 'Mark Express' },
+  { name: 'Mettur Transpots', code: 'Mettur Transpots' },
+  { name: 'NAPLOG Logistics', code: 'NAPLOG Logistics' },
+  { name: 'NimbusPost', code: 'NIMBUSPOST' },
+  { name: 'Nitco', code: 'Nitco' },
+  { name: 'OM Logistics', code: 'OM LOGISTICS' },
+  { name: 'Patel Onboard Logistics', code: 'Patel Onboard Logistics' },
+  { name: 'Pickrr', code: 'PICKRR' },
+  { name: 'Pidge', code: 'PIDGE' },
+  { name: 'Pikndel', code: 'PIKNDEL' },
+  { name: 'Pragathi Logistics', code: 'Pragathi logistics' },
+  { name: 'Proship', code: 'PROSHIP' },
+  { name: 'Radiant Logistics', code: 'Radiant Logistics' },
+  { name: 'Rivigo', code: 'RIVIGO' },
+  { name: 'Royal Mail', code: 'ROYAL MAIL' },
+  { name: 'Safe Express', code: 'safe express' },
+  { name: 'Seenu Transport', code: 'Seenu Transport' },
+  { name: 'Sequel', code: 'Sequel' },
+  { name: 'Shiprocket', code: 'SHIP ROCKET' },
+  { name: 'Shipease', code: 'SHIPEASE' },
+  { name: 'ShipGlobal', code: 'Shipglobal' },
+  { name: 'Shree Anjani Courier', code: 'SHREE ANJANI COURIER' },
+  { name: 'Shree Mahavir Express', code: 'SHREE MAHAVIR EXPRESS' },
+  { name: 'Shree Nandan Courier', code: 'SHREE NANDAN COURIER' },
+  { name: 'Shyplite', code: 'SHYPLITE' },
+  { name: 'Skyking', code: 'SKYKING' },
+  { name: 'SkyNet', code: 'SKYNET' },
+  { name: 'SkyNet World Wide', code: 'SKYNET World Wide' },
+  { name: 'SpiceJet', code: 'SPICEJET' },
+  { name: 'TCI Express', code: 'TCIEXPRESS' },
+  { name: 'TNT', code: 'TNT' },
+  { name: 'Total Courier', code: 'TOTALCOURIER' },
+  { name: 'UBX', code: 'UBX' },
+  { name: 'UPS', code: 'UPS' },
+  { name: 'USPS', code: 'USPS' },
+  { name: 'VRL Logistics', code: 'VRL Logistics' },
+  { name: 'Yodel', code: 'YODEL' },
+];
+
+const ALL_COURIERS = [...POPULAR_COURIERS, ...OTHER_COURIERS];
+
+const SYNC_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
+
 async function syncShipmentWithCourier(shipment) {
   const { data, error } = await supabase.functions.invoke('sync-shipment', {
     body: {
@@ -42,6 +147,18 @@ function buildWhatsAppLink(phone, brandName, orderId, courier, awb, trackUrl) {
     `Hi! Your order #${orderId} from ${brandName} has been shipped via ${courier} ` +
     `(AWB: ${awb}). Track your shipment live: ${trackUrl}`;
   return `https://wa.me/${intlPhone}?text=${encodeURIComponent(msg)}`;
+}
+
+function getInitialCourierCode() {
+  try {
+    const saved = localStorage.getItem('wismo_last_courier');
+    if (saved && ALL_COURIERS.some((c) => c.code === saved)) {
+      return saved;
+    }
+  } catch {
+    // Ignore storage access errors
+  }
+  return 'STCOURIER';
 }
 
 function AuthPage() {
@@ -176,15 +293,29 @@ function DashboardPage() {
   const [syncingId, setSyncingId] = useState(null);
   const [setupBrand, setSetupBrand] = useState('');
   const [setupPhone, setSetupPhone] = useState('');
-  const [form, setForm] = useState({
+
+  // Search & Filter states
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+
+  // Store Settings states
+  const [showSettings, setShowSettings] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsForm, setSettingsForm] = useState({
+    primary_color: '#7C2D12',
+    whatsapp_support: '',
+    promo_text: '',
+  });
+
+  const [form, setForm] = useState(() => ({
     customer_name: '',
     customer_phone: '',
     order_id: '',
-    courier_name: 'ST Courier',
+    courier_code: getInitialCourierCode(),
     awb_number: '',
     status: 'Picked up by ST Courier',
     eta_text: 'Arriving in 2–3 days',
-  });
+  }));
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -216,6 +347,11 @@ function DashboardPage() {
     setVendor(vData || null);
 
     if (vData) {
+      setSettingsForm({
+        primary_color: vData.primary_color || '#7C2D12',
+        whatsapp_support: vData.whatsapp_support || '',
+        promo_text: vData.promo_text || '',
+      });
       await fetchShipmentsForVendor(vData.id);
     }
   }
@@ -249,6 +385,35 @@ function DashboardPage() {
       return;
     }
     setVendor(data);
+    setSettingsForm({
+      primary_color: data.primary_color || '#7C2D12',
+      whatsapp_support: data.whatsapp_support || '',
+      promo_text: data.promo_text || '',
+    });
+  }
+
+  async function handleSaveSettings(e) {
+    e.preventDefault();
+    if (!vendor) return;
+    setSavingSettings(true);
+    const { data, error } = await supabase
+      .from('vendors')
+      .update({
+        primary_color: settingsForm.primary_color,
+        whatsapp_support: settingsForm.whatsapp_support.trim(),
+        promo_text: settingsForm.promo_text.trim(),
+      })
+      .eq('id', vendor.id)
+      .select()
+      .single();
+
+    setSavingSettings(false);
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    setVendor(data);
+    setShowSettings(false);
   }
 
   async function handleLogoUpload(e) {
@@ -288,6 +453,15 @@ function DashboardPage() {
     if (!vendor || submittingShipment) return;
     setSubmittingShipment(true);
 
+    const selectedCourier =
+      ALL_COURIERS.find((c) => c.code === form.courier_code) || POPULAR_COURIERS[0];
+
+    try {
+      localStorage.setItem('wismo_last_courier', selectedCourier.code);
+    } catch {
+      // Ignore storage errors
+    }
+
     const initialCheckpoint = [
       {
         status: form.status,
@@ -296,9 +470,6 @@ function DashboardPage() {
       },
     ];
 
-    const courierName = form.courier_name.trim() || 'ST Courier';
-    const courierCode = courierName.toUpperCase().includes('ST') ? 'STCOURIER' : 'STCOURIER';
-
     const { data, error } = await supabase
       .from('shipments')
       .insert({
@@ -306,8 +477,8 @@ function DashboardPage() {
         customer_name: form.customer_name.trim(),
         customer_phone: form.customer_phone.trim(),
         order_id: form.order_id.trim(),
-        courier_name: courierName,
-        courier_code: courierCode,
+        courier_name: selectedCourier.name,
+        courier_code: selectedCourier.code,
         awb_number: form.awb_number.trim().toUpperCase(),
         status: form.status,
         eta_text: form.eta_text.trim(),
@@ -322,7 +493,6 @@ function DashboardPage() {
       return;
     }
 
-    // Auto-sync live tracking right after inserting the shipment
     await syncShipmentWithCourier(data);
     await fetchShipmentsForVendor(vendor.id);
 
@@ -330,7 +500,7 @@ function DashboardPage() {
       customer_name: '',
       customer_phone: '',
       order_id: '',
-      courier_name: 'ST Courier',
+      courier_code: selectedCourier.code,
       awb_number: '',
       status: 'Picked up by ST Courier',
       eta_text: 'Arriving in 2–3 days',
@@ -340,6 +510,21 @@ function DashboardPage() {
 
   async function handleManualSync(shipment) {
     if (!vendor) return;
+
+    if (String(shipment.status).toLowerCase() === 'delivered') {
+      alert('This shipment is already marked Delivered—no further courier sync needed.');
+      return;
+    }
+
+    if (shipment.last_synced_at) {
+      const elapsed = Date.now() - new Date(shipment.last_synced_at).getTime();
+      if (elapsed < SYNC_COOLDOWN_MS) {
+        const minsLeft = Math.ceil((SYNC_COOLDOWN_MS - elapsed) / 60000);
+        alert(`Already synced recently. Please wait ${minsLeft} min(s) before syncing this AWB again.`);
+        return;
+      }
+    }
+
     setSyncingId(shipment.id);
     try {
       const res = await syncShipmentWithCourier(shipment);
@@ -414,9 +599,24 @@ function DashboardPage() {
     );
   }
 
+  const filteredShipments = shipments.filter((s) => {
+    const matchesStatus =
+      statusFilter === 'ALL' ||
+      String(s.status || '').toLowerCase() === statusFilter.toLowerCase();
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return matchesStatus;
+    return (
+      matchesStatus &&
+      (String(s.order_id || '').toLowerCase().includes(q) ||
+        String(s.customer_name || '').toLowerCase().includes(q) ||
+        String(s.customer_phone || '').toLowerCase().includes(q) ||
+        String(s.awb_number || '').toLowerCase().includes(q))
+    );
+  });
+
   return (
-    <div style={{ maxWidth: 960, margin: '24px auto', padding: 16, fontFamily: 'sans-serif' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
+    <div style={{ maxWidth: 980, margin: '24px auto', padding: 16, fontFamily: 'sans-serif' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {vendor.logo_url && (
             <img src={vendor.logo_url} alt={vendor.brand_name} style={{ width: 44, height: 44, objectFit: 'contain', borderRadius: 8, border: '1px solid #e5e7eb' }} />
@@ -427,18 +627,66 @@ function DashboardPage() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => setShowSettings((prev) => !prev)}
+            style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #d1d5db', background: showSettings ? '#f3f4f6' : '#fff', cursor: 'pointer', fontSize: 13 }}
+          >
+            Store Settings
+          </button>
           <label style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, cursor: 'pointer', fontSize: 13 }}>
             Upload Logo
             <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={handleLogoUpload} style={{ display: 'none' }} />
           </label>
-          <button onClick={handleSignOut} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer' }}>
+          <button onClick={handleSignOut} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer', fontSize: 13 }}>
             Sign Out
           </button>
         </div>
       </header>
 
-      <form onSubmit={handleAddShipment} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10, padding: 16, border: '1px solid #e5e7eb', borderRadius: 12, marginBottom: 24 }}>
+      {showSettings && (
+        <form onSubmit={handleSaveSettings} style={{ padding: 16, border: '1px solid #e5e7eb', borderRadius: 12, background: '#f9fafb', marginBottom: 20, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12, alignItems: 'end' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, color: '#374151', marginBottom: 4 }}>Brand Accent Color</label>
+            <input
+              type="color"
+              value={settingsForm.primary_color}
+              onChange={(e) => setSettingsForm({ ...settingsForm, primary_color: e.target.value })}
+              style={{ width: '100%', height: 38, padding: 2, borderRadius: 8, border: '1px solid #d1d5db', background: '#fff' }}
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, color: '#374151', marginBottom: 4 }}>Support WhatsApp Number</label>
+            <input
+              type="text"
+              placeholder="e.g., 919876543210"
+              value={settingsForm.whatsapp_support}
+              onChange={(e) => setSettingsForm({ ...settingsForm, whatsapp_support: e.target.value })}
+              style={{ width: '100%', padding: 9, borderRadius: 8, border: '1px solid #d1d5db' }}
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, color: '#374151', marginBottom: 4 }}>Tracking Page Promo Banner</label>
+            <input
+              type="text"
+              placeholder="e.g., Use code PARA10 for 10% off next order!"
+              value={settingsForm.promo_text}
+              onChange={(e) => setSettingsForm({ ...settingsForm, promo_text: e.target.value })}
+              style={{ width: '100%', padding: 9, borderRadius: 8, border: '1px solid #d1d5db' }}
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={savingSettings}
+            style={{ padding: '10px 14px', borderRadius: 8, border: 'none', background: '#111827', color: '#fff', fontWeight: 600, cursor: 'pointer' }}
+          >
+            {savingSettings ? 'Saving...' : 'Save Settings'}
+          </button>
+        </form>
+      )}
+
+      <form onSubmit={handleAddShipment} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(155px, 1fr))', gap: 10, padding: 16, border: '1px solid #e5e7eb', borderRadius: 12, marginBottom: 20 }}>
         <input
           type="text"
           placeholder="Customer Name"
@@ -449,7 +697,7 @@ function DashboardPage() {
         />
         <input
           type="text"
-          placeholder="WhatsApp Phone (e.g., 9876543210)"
+          placeholder="WhatsApp Phone (10 digits)"
           value={form.customer_phone}
           onChange={(e) => setForm({ ...form, customer_phone: e.target.value })}
           required
@@ -463,14 +711,22 @@ function DashboardPage() {
           required
           style={{ padding: 10, borderRadius: 8, border: '1px solid #d1d5db' }}
         />
-        <input
-          type="text"
-          placeholder="Courier (ST Courier)"
-          value={form.courier_name}
-          onChange={(e) => setForm({ ...form, courier_name: e.target.value })}
-          required
-          style={{ padding: 10, borderRadius: 8, border: '1px solid #d1d5db' }}
-        />
+        <select
+          value={form.courier_code}
+          onChange={(e) => setForm({ ...form, courier_code: e.target.value })}
+          style={{ padding: 10, borderRadius: 8, border: '1px solid #d1d5db', background: '#fff' }}
+        >
+          <optgroup label="Popular Couriers">
+            {POPULAR_COURIERS.map((c) => (
+              <option key={c.code} value={c.code}>{c.name}</option>
+            ))}
+          </optgroup>
+          <optgroup label="All Supported Couriers (A–Z)">
+            {OTHER_COURIERS.map((c) => (
+              <option key={c.code} value={c.code}>{c.name}</option>
+            ))}
+          </optgroup>
+        </select>
         <input
           type="text"
           placeholder="AWB / Tracking #"
@@ -488,6 +744,27 @@ function DashboardPage() {
         </button>
       </form>
 
+      {/* Search & Status Filter Bar */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        <input
+          type="text"
+          placeholder="Search by Order ID, Customer, Phone, or AWB..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={{ flex: 1, minWidth: 220, padding: 9, borderRadius: 8, border: '1px solid #d1d5db', fontSize: 13 }}
+        />
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          style={{ padding: 9, borderRadius: 8, border: '1px solid #d1d5db', fontSize: 13, background: '#fff' }}
+        >
+          <option value="ALL">All Statuses ({shipments.length})</option>
+          {STATUS_STEPS.map((st) => (
+            <option key={st} value={st}>{st}</option>
+          ))}
+        </select>
+      </div>
+
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
           <thead>
@@ -499,7 +776,7 @@ function DashboardPage() {
             </tr>
           </thead>
           <tbody>
-            {shipments.map((s) => {
+            {filteredShipments.map((s) => {
               const trackPath = `/t/${vendor.slug}/${encodeURIComponent(s.awb_number)}`;
               const fullTrackUrl = `${window.location.origin}${trackPath}`;
               const waUrl = buildWhatsAppLink(
@@ -511,6 +788,7 @@ function DashboardPage() {
                 fullTrackUrl
               );
               const isSyncing = syncingId === s.id;
+              const isDelivered = String(s.status || '').toLowerCase() === 'delivered';
 
               return (
                 <tr key={s.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
@@ -543,11 +821,20 @@ function DashboardPage() {
                   <td style={{ padding: 10, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                     <button
                       type="button"
-                      disabled={isSyncing}
+                      disabled={isSyncing || isDelivered}
                       onClick={() => handleManualSync(s)}
-                      style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db', background: '#f9fafb', color: '#111827', fontSize: 13, cursor: 'pointer' }}
+                      title={isDelivered ? 'Already delivered' : 'Fetch latest courier scan'}
+                      style={{
+                        padding: '6px 10px',
+                        borderRadius: 6,
+                        border: '1px solid #d1d5db',
+                        background: isDelivered ? '#f3f4f6' : '#f9fafb',
+                        color: isDelivered ? '#9ca3af' : '#111827',
+                        fontSize: 13,
+                        cursor: isDelivered ? 'not-allowed' : 'pointer',
+                      }}
                     >
-                      {isSyncing ? 'Syncing...' : 'Sync Live'}
+                      {isSyncing ? 'Syncing...' : isDelivered ? 'Delivered' : 'Sync Live'}
                     </button>
                     <Link to={trackPath} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db', textDecoration: 'none', color: '#111827', fontSize: 13 }}>
                       Track Page
@@ -564,10 +851,12 @@ function DashboardPage() {
                 </tr>
               );
             })}
-            {shipments.length === 0 && (
+            {filteredShipments.length === 0 && (
               <tr>
                 <td colSpan={4} style={{ padding: 20, textAlign: 'center', color: '#6b7280' }}>
-                  No shipments yet. Add your first ST Courier tracking number above.
+                  {shipments.length === 0
+                    ? 'No shipments yet. Add your first ST Courier tracking number above.'
+                    : 'No shipments match your search or status filter.'}
                 </td>
               </tr>
             )}
